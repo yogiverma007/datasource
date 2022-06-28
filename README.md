@@ -1,194 +1,92 @@
-# HttpClient Module
+# Datasource Module
 
-This repository provides the configurable http client. Just change the the property of your http client's in the data source in which you are keeping all the properties and the library will create a new http client and it will replace in your HttpClients Store in the code.
+This repository provides the datasource configuration for mysql
 
 You need to take care of mainly below items to use the library:
-- Import or copy http client maven module to your project.
-- Http Client Initializer
-- Http client properties in your configuration.
-- Main HttpClient Class which does the magic of interaction with the services.
+- Specify the environment variables in your environment and list can be found below:
 
-
-### HttpClient Initializer
-```java
-@Component
-public class TouristHttpClientInitializer extends HttpClientInitializer {
-
-  private final Environment environment;
-
-  @Autowired
-  public TouristHttpClientInitializer(Environment environment) {
-    this.environment = environment;
-  }
-
-  @PostConstruct
-  private void init() {
-    refreshClient();
-  }
-
-  // refresh this http client from some scheduler to refresh client according to your requirements.
-  public void refreshClient() {
-    log.info("Refreshing TOURIST - Http Client");
-    initializeHttpClient(TOURIST.name());
-    log.info("Http Client TOURIST refreshed");
-  }
-
-  @Override
-  public String providePropertyValue(String propertyName) {
-    // return value for the properties from your data source: DB/CACHE/SPRING, etc
-    return environment.getProperty(propertyName);
-  }
-}
-```
+- EMPLOYEE_DB_HOST=127.0.0.1
+- EMPLOYEE_DB_PORT=3306
+- EMPLOYEE_DB_NAME=employee
+- EMPLOYEE_DB_USER=<username>
+- EMPLOYEE_DB_PASSWORD=<password>
 
 ------------
 
-### Http client properties in your configuration.
-Comma separated all http client names in below property:
-- http.client.names=TOURIST,GOOGLE_APIS
-
-Individual Http Client's property can be defined according to below:
-
-- http.client.**TOURIST**.socket.timeout=2000
-- http.client.**TOURIST**.connection.timeout=1000
-- http.client.**TOURIST**.connection.request.timeout=500
-- http.client.**TOURIST**.max.connections=50
-- http.client.**TOURIST**.max.per.channel=20
-- http.client.**TOURIST**.connection.validate.inactivity.period=2000
-
-- http.client.**GOOGLE_APIS**.socket.timeout=2000
-- http.client.**GOOGLE_APIS**.connection.timeout=1000
-- http.client.**GOOGLE_APIS**.connection.request.timeout=500
-- http.client.**GOOGLE_APIS**.max.connections=50
-- http.client.**GOOGLE_APIS**.max.per.channel=20
-- http.client.**GOOGLE_APIS**.connection.validate.inactivity.period=2000
-
-Below are the example Urls configured for this client:
-- tourist.fetch-tourists-url=http://restapi.adequateshop.com/api/Tourist?page=1
-- tourist.create-tourists-url=http://restapi.adequateshop.com/api/Tourist
+### Database properties can be overridden in your configuration.
+- employee.datasource.poolName=EmployeeDatabasePool
+- employee.datasource.jdbcUrl=jdbc:mysql://${EMPLOYEE_DB_HOST}:${EMPLOYEE_DB_PORT}/${EMPLOYEE_DB_NAME}?&useSSL=false&allowPublicKeyRetrieval=true
+- employee.datasource.username=${EMPLOYEE_DB_USER}
+- employee.datasource.password=${EMPLOYEE_DB_PASSWORD}
+- employee.datasource.prepStmtCacheSize=250
+- employee.datasource.prepStmtCacheSqlLimit=2048
+- employee.datasource.cachePrepStmts=true
+- employee.datasource.maximumPoolSize=5
+- employee.datasource.maxLifetime=1800000
+- employee.datasource.connectionTimeout=250
+- employee.datasource.leakDetectionThreshold=600000
+- employee.datasource.autoCommit=true
 
 
-------------
-
-
-### Main HttpClient Class
-
+### Employee main entity class
 ```java
-@Component
-@Slf4j
-public class TouristHttpClient {
+import com.freedom.datasource.dto.EmployeeExtendedInfoDto;
+import com.vladmihalcea.hibernate.type.json.JsonStringType;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import org.hibernate.annotations.DynamicInsert;
+import org.hibernate.annotations.DynamicUpdate;
+import org.hibernate.annotations.Type;
+import org.hibernate.annotations.TypeDef;
 
-  private static final long HTTP_CLIENT_COMMUNICATION_RETRY_BACKOFF = 1000l;
+import javax.persistence.*;
+import java.io.Serializable;
+import java.util.Date;
 
-  private final HttpClient httpClient;
-  private final TouristConfig touristConfig;
+@Data
+@Entity
+@NoArgsConstructor
+@AllArgsConstructor
+@DynamicInsert
+@DynamicUpdate
+@Table(name = "employee")
+@TypeDef(name = "json", typeClass = JsonStringType.class)
+public class Employee implements Serializable {
 
-  @Autowired
-  public TouristHttpClient(HttpClient httpClient, TouristConfig touristConfig) {
-    this.httpClient = httpClient;
-    this.touristConfig = touristConfig;
-  }
+  private static final long serialVersionUID = 1L;
 
-  @Retryable(
-      value = {Exception.class},
-      maxAttemptsExpression = "3",
-      backoff = @Backoff(delay = HTTP_CLIENT_COMMUNICATION_RETRY_BACKOFF),
-      listeners = "genericReadTimeoutRetryHttpListener",
-      recover = "createTouristRecover")
-  public Tourist createTourist(CreateTouristRequest requestDto) {
-    log.info("Calling create tourist api");
+  @Id
+  @Column(name = "id", nullable = false)
+  @GeneratedValue(strategy = GenerationType.IDENTITY)
+  private Long id;
 
-    Map<String, String> headers = createHeaders();
-    return httpClient.request(
-        TOURIST.name(),
-        POST,
-        touristConfig.getCreateTouristsUrl(),
-        requestDto,
-        headers,
-        Tourist.class);
-  }
+  @Column(name = "name", nullable = false)
+  private String name;
 
-  @Recover
-  private String createTouristRecover(Throwable throwable, CreateTouristRequest requestDto) {
-    log.info("Reached recover method for create tourist");
-    if (throwable instanceof ResourceAccessException
-        && throwable.getCause() instanceof SocketTimeoutException) {
-      log.info("CREATE_TOURIST_READ_TIMEOUT: {}");
-    } else if (throwable instanceof ResourceAccessException
-        && (throwable.getCause() instanceof ConnectTimeoutException || throwable.getCause() instanceof ConnectException)) {
-      log.info("CREATE_TOURIST_CONNECTION_FAILED: {}");
-    }
+  @Column(name = "contact", nullable = false)
+  private String contact;
 
-    if (throwable instanceof HttpClientErrorException) {
-      // 4xx
-      HttpClientErrorException exception = (HttpClientErrorException) throwable;
-      log.info("CREATE_TOURIST_FAILED_{}_ERROR", exception.getRawStatusCode());
+  @Column(name = "address")
+  private String address;
 
-    } else if (throwable instanceof HttpServerErrorException) {
-      // 5xx
-      HttpServerErrorException exception = (HttpServerErrorException) throwable;
-      log.info("CREATE_TOURIST_FAILED_{}_ERROR", exception.getRawStatusCode());
-    } else {
-      log.info("CREATE_TOURIST_FAILED");
-    }
-    return null;
-  }
+  @Column(name = "status", nullable = false)
+  private String status;
 
-  @Retryable(
-      value = {Exception.class},
-      maxAttemptsExpression = "3",
-      backoff = @Backoff(delay = HTTP_CLIENT_COMMUNICATION_RETRY_BACKOFF),
-      listeners = "genericReadTimeoutRetryHttpListener",
-      recover = "getTouristRecover")
-  public TouristResponse getTourist() {
+  @Column(name = "extended_info")
+  @Type(type = "json")
+  private EmployeeExtendedInfoDto extendedInfo;
 
-    log.info("Fetching all users");
+  @Column(name = "created_on", insertable = false, updatable = false)
+  private Date createdOn;
 
-    Map<String, String> headers = createHeaders();
-
-    return httpClient.request(
-        TOURIST.name(),
-        GET,
-        touristConfig.getFetchTouristsUrl(),
-        null,
-        headers,
-        TouristResponse.class);
-  }
-
-  @Recover
-  private TouristResponse getTouristRecover(Throwable throwable) {
-    log.info("Reached recover method for get users");
-    if (throwable instanceof ResourceAccessException
-        && throwable.getCause() instanceof SocketTimeoutException) {
-      log.info("GET_USERS_READ_TIMEOUT");
-
-    } else if (throwable instanceof ResourceAccessException
-        && (throwable.getCause() instanceof ConnectTimeoutException || throwable.getCause() instanceof ConnectException)) {
-      log.info("GET_USERS_CONNECTION_FAILED");
-    }
-    if (throwable instanceof HttpClientErrorException) {
-      // 4xx
-      HttpClientErrorException exception = (HttpClientErrorException) throwable;
-      log.info("GET_USERS_FAILED_{}_ERROR", exception.getRawStatusCode());
-
-    } else if (throwable instanceof HttpServerErrorException) {
-      // 5xx
-      HttpServerErrorException exception = (HttpServerErrorException) throwable;
-      log.info("GET_USERS_FAILED_{}_ERROR", exception.getRawStatusCode());
-    } else {
-      log.info("GET_USERS_FAILED");
-    }
-    return null;
-  }
-
-  private Map<String, String> createHeaders() {
-    Map<String, String> headers = new HashMap<>();
-    headers.put(CONTENT_TYPE, APPLICATION_JSON_VALUE);
-    return headers;
-  }
+  @Column(name = "updated_on", insertable = false, updatable = false)
+  private Date updatedOn;
 }
 ```
 
 
+In the main entity class  EmployeeExtendedInfoDto is the column which describes json from database table as: extended_info and whose defination is taken by @Type annotation.
 
-Taken help from this to call rest apis: https://www.appsloveworld.com/free-online-sample-rest-api-url-for-testing/#createtourist
+
+Dev followed from this link: https://vladmihalcea.com/how-to-map-json-objects-using-generic-hibernate-types/
